@@ -1,0 +1,1 @@
+When pulling 5m candles the latest candle is still open
