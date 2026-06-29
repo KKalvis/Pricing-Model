@@ -4,7 +4,7 @@ import requests
 
 SYMBOL = "SOLUSDT"
 INTERVAL = "5m"
-TOTAL_CANDLES = 15005
+TOTAL_CANDLES = 150000
 LIMIT = 1500
 URL = "https://fapi.binance.com/fapi/v1/klines"
 
@@ -45,39 +45,40 @@ def fetch_candles(symbol: str, interval: str, total_candles: int, limit: int) ->
     return df
 
 
-def analyze_transitions(df: pd.DataFrame):
 
+def analyze_transitions(df: pd.DataFrame, past_candles: int = 2):
     df["state"] = "down"
     df.loc[df["close"] > df["open"], "state"] = "up"
     df["previous_state"] = df['state'].shift(1)
+
     
+
+    history_cols = []
+
+    for i in range(past_candles, 0, -1):
+        df[f'state_minus_{i}'] = df['state'].shift(i)
+        history_cols.append(f'state_minus_{i}')
+
     df_clean = df.dropna().copy()
-    
-    transitions = df_clean.groupby(['previous_state', 'state']).size().to_dict()
-    
-    uu = transitions.get(('up', 'up'), 0)
-    ud = transitions.get(('up', 'down'), 0)
-    du = transitions.get(('down', 'up'), 0)
-    dd = transitions.get(('down', 'down'), 0)
-    total = len(df_clean)
+    df_clean["history"] = df_clean[history_cols].agg(''.join, axis=1)
 
-    print(f"\nUU: {uu}, DD: {dd}, DU: {du}, UD: {ud}")
-    print(f"UU_chance: {uu/total*100:.2f}%, DD_chance: {dd/total*100:.2f}%, DU_chance: {du/total*100:.2f}%, UD_chance: {ud/total*100:.2f}%")
 
-    latest_state = df_clean.iloc[-1]["state"]
-    print(f"\nLatest observed state: {latest_state.upper()}")
+    latest_history = "".join(df_clean["state"].iloc[-past_candles:].tolist())
+    transitions = df_clean.groupby(['history', 'state']).size().to_dict()
 
-    if latest_state == "up":
-        prediction_u = (uu / (uu + ud)) * 100
-        prediction_d = (ud / (uu + ud)) * 100
-    else:
-        prediction_u = (du / (du + dd)) * 100
-        prediction_d = (dd / (du + dd)) * 100
+    if transitions.get((latest_history, 'up'), 0) + transitions.get((latest_history, 'down'), 0) == 0:
+        print(f"\nNo historical occurrences of pattern. Try lowering the number of past candles, or increasing the dataset size: {latest_history}. Unable to make a prediction.")
+        return
+
+    prediction_u = transitions.get((latest_history, 'up'), 0) / (transitions.get((latest_history, 'up'), 0) + transitions.get((latest_history, 'down'), 0)) * 100
+    prediction_d = transitions.get((latest_history, 'down'), 0) / (transitions.get((latest_history, 'up'), 0) + transitions.get((latest_history, 'down'), 0)) * 100
 
     print(f"Prediction for next state -> Up: {prediction_u:.2f}%, Down: {prediction_d:.2f}%")
+
 
 
 if __name__ == "__main__":
     historical_df = fetch_candles(SYMBOL, INTERVAL, TOTAL_CANDLES, LIMIT)
     
-    analyze_transitions(historical_df)
+    analyze_transitions(historical_df, past_candles=3)
+    
